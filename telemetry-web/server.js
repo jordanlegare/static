@@ -475,7 +475,7 @@ server = http.createServer((request, response) => {
     response.write('retry: 1500\n');
     response.write('event: state\ndata: ' + JSON.stringify(snapshot()) + '\n\n');
     clients.add(response);
-    request.on('close', () => clients.delete(response));
+    response.on('close', () => clients.delete(response));
     return;
   }
 
