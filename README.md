@@ -190,6 +190,19 @@ npm start
 
 Or run `node server.js` directly. The service binds to `127.0.0.1` by default; override the port with `STATICBUS_WEB_PORT=8091` if needed. Use `PERF_BIN` to select a non-default perf executable. The Start/Stop buttons control the `perf stat` collector. Stop the server with Ctrl+C.
 
+### Run the web dashboard with `sudo`
+
+If the dashboard reports that perf events are unavailable because the current user lacks permission, run the Node.js server with elevated privileges. From the repository checkout:
+
+```sh
+cd telemetry-web
+sudo node server.js
+```
+
+Then open [http://127.0.0.1:8090](http://127.0.0.1:8090) and press **Start** in the dashboard. The server launches the `perf stat` collector; keep the terminal open while using the dashboard. Stop it with **Ctrl+C**.
+
+Running the server with `sudo` gives the server process and its child collector root privileges, so use this only when needed. The dashboard is designed to bind to `127.0.0.1` (localhost). Keep it on loopback: do not put it behind a public or LAN-facing port, and do not change the binding to `0.0.0.0`. Root privileges do not guarantee every PMU event will be available; event support still depends on the CPU, kernel, firmware and perf configuration.
+
 The dashboard is intentionally localhost-only and has no external JavaScript or charting dependencies. It does not expose a general command execution API. Perf's JSON interval output supplies PMU samples; `/proc/stat` supplies aggregate interrupt counts; EDAC values are read from sysfs. A chart reflects these sampled metrics, not individual DRAM transactions or raw DDR signal bytes. If counters do not appear, review the diagnostic panel and run the same `perf stat` command from a terminal with the required permissions.
 
 Check source syntax with:
