@@ -6,4 +6,5 @@ Module.symvers
 modules.order
 .*.cmd
 frontend/staticbus-gtk
+frontend/staticbus-telemetry-gtk
 tools/staticbus-replay
