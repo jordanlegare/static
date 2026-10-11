@@ -43,7 +43,7 @@ See [`docs/PHYSICAL_CAPTURE_DESIGN.md`](docs/PHYSICAL_CAPTURE_DESIGN.md) for the
 
 For a machine-only workflow, use CPU and kernel telemetry rather than claiming to sample raw CPU/DDR wires. Depending on the platform and kernel, data sources may include Linux interrupt tracepoints, perf/PMU counters, Intel Processor Trace or vendor equivalents, and EDAC/RAS/MCE memory-error reports. These reveal execution flow, aggregate performance events, interrupt activity and hardware-reported errors; they do **not** expose a literal byte stream from the physical DDR bus or reconstruct arbitrary missing bus bytes.
 
-See [`docs/SOFTWARE_ONLY_CAPTURE.md`](docs/SOFTWARE_ONLY_CAPTURE.md) for the no-probe architecture and inventory commands. The earlier [physical capture design](docs/PHYSICAL_CAPTURE_DESIGN.md) describes an optional external-hardware path. The existing GTK app and `/dev/staticbus0` FIFO currently visualize software-fed/replayed bytes; neither implementation yet collects perf/tracefs/EDAC telemetry as a live no-probe backend.
+See [`docs/SOFTWARE_ONLY_CAPTURE.md`](docs/SOFTWARE_ONLY_CAPTURE.md) for the no-probe architecture and inventory commands. The earlier [physical capture design](docs/PHYSICAL_CAPTURE_DESIGN.md) describes an optional external-hardware path. The separate `frontend/staticbus-telemetry-gtk` prototype reads supported `uncore_imc` read/write PMU counters through `perf_event_open`, CPU cache-miss counters, the global interrupt count from `/proc/stat`, Intel PT availability, and active EDAC counters. It reports raw PMU event counts/sec rather than assuming these counts equal byte traffic. Tracefs collection and live Intel PT recording are not implemented in this first version.
 
 ## Requirements
 
@@ -76,6 +76,23 @@ make -C tools
 ```
 
 The kernel module is built against `/lib/modules/$(uname -r)/build`. If your target kernel differs, pass `KDIR=/path/to/kernel/build` to `make -C kernel`.
+
+### Run the software-only telemetry frontend
+
+Build the GTK applications with `make -C frontend`, then launch:
+
+```sh
+./frontend/staticbus-telemetry-gtk
+```
+
+The live dashboard attempts to open the host's `uncore_imc/data_reads`, `uncore_imc/data_writes` and CPU cache-misses perf events. Perf permissions and PMU implementation vary by host. If counters are unavailable, check:
+
+```sh
+cat /proc/sys/kernel/perf_event_paranoid
+sudo perf stat -a -I 1000 -e uncore_imc/data_reads/,uncore_imc/data_writes/ -- sleep 5
+```
+
+Use the short `perf stat` command to verify that the kernel can open the memory-controller counters. Avoid running a whole desktop session as root just to bypass perf permissions. Intel PT is only identified as available by the dashboard; a separate, short, intentional `perf record -e intel_pt//` session is needed to create execution-trace data, and that data is not a raw DDR capture.
 
 ## Load the kernel module
 
