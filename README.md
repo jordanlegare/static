@@ -4,14 +4,36 @@
 
 > **Hardware limitation:** a normal Linux kernel module cannot passively read arbitrary electrical CPU package/bus pins on a modern PC. Most CPU-internal buses are not exposed as host-readable interfaces. Capturing physical bus activity requires compatible external hardware (such as an FPGA/logic analyzer) and a producer/driver that converts its samples into bytes. This project provides the kernel-to-GTK streaming path; it is not itself a physical bus probe or a CPU instrumentation tool.
 
-## Features
+## Capabilities
 
-- Kernel module with a bounded FIFO and `/dev/staticbus0` character device.
-- Blocking writes with backpressure when the reader falls behind; nonblocking reads for a responsive GUI.
-- `poll(2)` support and an `ioctl(2)` statistics API.
-- C++ GTK 4 frontend with a rolling byte-frequency histogram, recent hexadecimal bytes, queue occupancy, byte counters, Shannon entropy, and average changed bits per byte.
-- Binary capture replay utility for testing without capture hardware.
-- Build/install/unload steps documented below.
+### Implemented: byte-stream path
+
+- Linux character device `/dev/staticbus0` backed by a bounded kernel FIFO.
+- Blocking producer writes with backpressure when the FIFO is full; nonblocking consumer reads for a responsive UI.
+- `poll(2)` readiness and `STATICBUS_IOC_GET_STATS` for ABI version, FIFO capacity/occupancy, and byte counters.
+- C++/GTK 4 byte-stream monitor with a rolling 256-value byte-frequency histogram, recent hexadecimal bytes, queue occupancy, byte counters, Shannon entropy, and average changed bits per byte.
+- Binary capture replay utility for feeding known test data into the byte-stream path.
+
+### Implemented: no-probe software telemetry
+
+The separate `frontend/staticbus-telemetry-gtk` application uses interfaces already exposed by Linux and the host CPU. It currently attempts to collect:
+
+- **Memory-controller read/write PMU counters** from `uncore_imc/data_reads` and `uncore_imc/data_writes` through `perf_event_open`. When the PMU exports `.scale` and `.unit` metadata, the frontend applies that scale and labels the reported rate accordingly.
+- **CPU cache misses** using the standard hardware cache-misses event across online CPUs, where permitted.
+- **Aggregate host interrupt rate** by sampling the total interrupt count in `/proc/stat`. This is not a per-IRQ trace.
+- **EDAC memory error counters** from active `/sys/devices/system/edac/mc` controller `ce_count`/`ue_count` files, when present.
+- **Intel PT capability presence** by checking whether the `intel_pt` PMU is registered. The current GUI does not start, save, or decode an Intel PT recording.
+
+Availability depends on the CPU, firmware, kernel configuration, PMU event aliases, and permissions. Unsupported counters are reported as unavailable rather than synthesized.
+
+### Planned / design-only
+
+- A hardware-specific PCIe/FPGA driver with DMA capture rings and interrupt-driven acquisition.
+- The proposed `/dev/staticbus-capture0` UAPI in `include/staticbus_capture_uapi.h`.
+- Live tracefs IRQ-event collection and a managed Intel PT recording workflow.
+- Protocol-specific decoding of physical bus traces.
+
+The first two hardware-capture items are architecture/design artifacts only; there is no PCIe/FPGA capture driver in this repository yet.
 
 ## Architecture
 
@@ -41,7 +63,7 @@ See [`docs/PHYSICAL_CAPTURE_DESIGN.md`](docs/PHYSICAL_CAPTURE_DESIGN.md) for the
 
 ## Software-only capture (no external probes)
 
-For a machine-only workflow, use CPU and kernel telemetry rather than claiming to sample raw CPU/DDR wires. Depending on the platform and kernel, data sources may include Linux interrupt tracepoints, perf/PMU counters, Intel Processor Trace or vendor equivalents, and EDAC/RAS/MCE memory-error reports. These reveal execution flow, aggregate performance events, interrupt activity and hardware-reported errors; they do **not** expose a literal byte stream from the physical DDR bus or reconstruct arbitrary missing bus bytes.
+For a machine-only workflow, use CPU and kernel telemetry rather than claiming to sample raw CPU/DDR wires. The currently implemented telemetry frontend reads the available perf/PMU counters listed above, samples aggregate interrupts from `/proc/stat`, checks for an `intel_pt` PMU, and reads active EDAC controller error counters where exposed. This reveals memory-controller activity, cache misses, host interrupt rate, Intel PT availability, and hardware-reported EDAC errors; it does **not** expose a literal byte stream from the physical DDR bus or reconstruct arbitrary missing bus bytes.
 
 See [`docs/SOFTWARE_ONLY_CAPTURE.md`](docs/SOFTWARE_ONLY_CAPTURE.md) for the no-probe architecture and inventory commands. The earlier [physical capture design](docs/PHYSICAL_CAPTURE_DESIGN.md) describes an optional external-hardware path. The separate `frontend/staticbus-telemetry-gtk` prototype reads supported `uncore_imc` read/write PMU counters through `perf_event_open`, CPU cache-miss counters, the global interrupt count from `/proc/stat`, Intel PT availability, and active EDAC counters. It applies each PMU event's exported `.scale` and `.unit` metadata when available (for example, reporting MiB/s if the host exports MiB units); counters without unit metadata remain event counts/sec. Tracefs collection and live Intel PT recording are not implemented in this first version.
 
