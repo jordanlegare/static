@@ -55,7 +55,7 @@ This provides error telemetry, not a universal detector for every electrical dis
 
 ## Recommended implementation for staticbus
 
-Keep the existing /dev/staticbus0 FIFO for synthetic-data testing and replay, but do not make it the live source for software-only telemetry. Add a separate C++ collector library/backend that gathers native telemetry from supported Linux APIs and provides normalized events to the GTK UI.
+Keep the existing /dev/staticbus0 FIFO for synthetic-data testing and replay. The new frontend/staticbus-telemetry-gtk.cpp prototype is a separate no-probe GTK application that samples supported uncore_imc data_reads/data_writes aliases using perf_event_open, a CPU cache-misses counter, the interrupt total from /proc/stat, Intel PT availability, and active EDAC sysfs counters. It deliberately reports raw PMU event counts per second rather than guessing that a counter equals bytes. It does not yet collect/decode an Intel PT trace; those recordings are an explicit perf workflow.
 
 Suggested normalized record:
 
@@ -105,7 +105,7 @@ Not every path or event exists on every machine. The inventory determines which 
 - Confirm PMU units, scope (per-core/system-wide), multiplexing and availability before interpreting values.
 - Verify trace loss through each source's documented counters.
 - For EDAC, validate the interface and current counters rather than intentionally injecting memory faults on a production system.
-- Label dashboards as **CPU execution trace**, **interrupts**, **memory-controller counters**, **trace loss**, or **hardware-reported memory errors**. Do not label these as raw DDR samples.
+- Label dashboards as **CPU execution trace**, **interrupts**, **memory-controller counters**, **trace loss**, or **hardware-reported memory errors**. Do not label these as raw DDR samples. The prototype GUI exposes these no-probe counters, but does not yet implement tracefs event collection or live Intel PT recording.
 
 ## References
 
