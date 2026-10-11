@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-const HOST = process.env.STATICBUS_WEB_HOST || '127.0.0.1';
+const HOST = '127.0.0.1';
 const PORT = Number.parseInt(process.env.STATICBUS_WEB_PORT || '8090', 10);
 const PERF = process.env.PERF_BIN || 'perf';
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -413,8 +413,12 @@ function sameOriginRequest(request) {
   if (!origin) return true;
   try {
     const parsed = new URL(origin);
-    return parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost' ||
-           parsed.hostname === '[::1]';
+    const allowedOrigins = new Set([
+      'http://127.0.0.1:' + PORT,
+      'http://localhost:' + PORT,
+      'http://[::1]:' + PORT
+    ]);
+    return allowedOrigins.has(parsed.origin);
   } catch {
     return false;
   }
