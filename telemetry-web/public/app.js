@@ -23,7 +23,8 @@ function formatValue(value) {
 }
 
 function setText(id, value) {
-  byId(id).textContent = value == null ? '' : String(value);
+  const element = byId(id);
+  if (element) element.textContent = value == null ? '' : String(value);
 }
 
 function metricStatus(metric) {
