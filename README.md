@@ -29,6 +29,15 @@ Bus capture hardware (FPGA / logic analyzer)
 
 The device is a byte FIFO, not a packet protocol: write boundaries are not preserved, and reads return whatever number of bytes is currently available. Use your capture source's own framing information if sample boundaries matter.
 
+
+## Physical CPU/memory-bus capture (hardware-backed design)
+
+The current `staticbus.ko` is a software-fed FIFO, not a physical bus probe. Capturing an external DDR memory interface requires a generation-compatible analyzer/interposer or a custom FPGA capture appliance with a validated high-speed probe front end, hardware buffering, sequence numbers, timestamps and hardware-overrun reporting. CPU-internal fabric signals are generally not exposed on ordinary external pins and cannot be captured by this module.
+
+The recommended next-stage architecture is a separate PCIe hardware driver with DMA block acquisition, MSI/MSI-X completion interrupts, and a read-only mmap ring for completed blocks. Loss must be recorded separately for hardware FIFO overruns, DMA overruns, host ring exhaustion, sequence gaps, CRC failures and clock unlock. A missing block must never be silently replaced by guessed bytes.
+
+See [`docs/PHYSICAL_CAPTURE_DESIGN.md`](docs/PHYSICAL_CAPTURE_DESIGN.md) for the capture architecture, hardware requirements, ring semantics, validation plan and kernel/userspace API. The draft interface is in [`include/staticbus_capture_uapi.h`](include/staticbus_capture_uapi.h). **That hardware-backed ABI is a design contract only; no PCIe/FPGA device driver implements it yet.** The existing `/dev/staticbus0` API remains for software-fed streams and replay.
+
 ## Requirements
 
 - Linux kernel headers for the running kernel (`linux-headers-$(uname -r)` on Debian/Ubuntu).
