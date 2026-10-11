@@ -1,17 +1,19 @@
 CXX ?= c++
 PKG_CONFIG ?= pkg-config
-TARGET := staticbus-gtk
-SOURCES := staticbus-gtk.cpp
-CPPFLAGS += -I../include $(shell $(PKG_CONFIG) --cflags gtk4)
+GTK4_CFLAGS := $(shell $(PKG_CONFIG) --cflags gtk4)
+GTK4_LIBS := $(shell $(PKG_CONFIG) --libs gtk4)
+CPPFLAGS += -I../include $(GTK4_CFLAGS)
 CXXFLAGS ?= -O2 -g
 CXXFLAGS += -std=c++17 -Wall -Wextra -Wpedantic
-LDLIBS += $(shell $(PKG_CONFIG) --libs gtk4)
 
 .PHONY: all clean
-all: $(TARGET)
+all: staticbus-gtk staticbus-telemetry-gtk
 
-$(TARGET): $(SOURCES) ../include/staticbus_ioctl.h
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ $(SOURCES) $(LDLIBS)
+staticbus-gtk: staticbus-gtk.cpp ../include/staticbus_ioctl.h
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ $< $(GTK4_LIBS)
+
+staticbus-telemetry-gtk: staticbus-telemetry-gtk.cpp
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ $< $(GTK4_LIBS)
 
 clean:
-	rm -f $(TARGET)
+	rm -f staticbus-gtk staticbus-telemetry-gtk
