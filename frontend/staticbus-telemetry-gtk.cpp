@@ -222,7 +222,12 @@ bool build_pmu_attr(const fs::path& pmu_path, const std::string& event_name,
     attr.type = static_cast<std::uint32_t>(type);
     attr.read_format = PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING;
     attr.disabled = 1;
-    attr.exclude_guest = 1;
+    /*
+     * Do not set exclude_guest for generic sysfs PMUs. Some uncore PMU drivers
+     * reject guest-exclusion filters with EINVAL even though perf's default
+     * event configuration is accepted. This counter is host-wide telemetry;
+     * preserve the PMU driver's default filtering semantics.
+     */
 
     for (const auto& item : split(alias, ',')) {
         const auto equals = item.find('=');
