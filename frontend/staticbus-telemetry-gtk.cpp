@@ -521,10 +521,10 @@ GtkWidget *make_metric(const char *title, GtkWidget **label_out)
     gtk_label_set_xalign(GTK_LABEL(label), 0.0F);
     gtk_label_set_yalign(GTK_LABEL(label), 0.0F);
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
-    gtk_widget_set_margin_top(label, 10);
-    gtk_widget_set_margin_bottom(label, 10);
-    gtk_widget_set_margin_start(label, 12);
-    gtk_widget_set_margin_end(label, 12);
+    gtk_widget_set_margin_top(label, 6);
+    gtk_widget_set_margin_bottom(label, 6);
+    gtk_widget_set_margin_start(label, 8);
+    gtk_widget_set_margin_end(label, 8);
     gtk_frame_set_child(GTK_FRAME(frame), label);
     *label_out = label;
     return frame;
@@ -537,11 +537,11 @@ void activate(GtkApplication *application, gpointer user_data)
     gtk_window_set_title(GTK_WINDOW(app->window), "staticbus — Software Telemetry");
     gtk_window_set_default_size(GTK_WINDOW(app->window), 900, 680);
 
-    GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    gtk_widget_set_margin_top(root, 18);
-    gtk_widget_set_margin_bottom(root, 18);
-    gtk_widget_set_margin_start(root, 18);
-    gtk_widget_set_margin_end(root, 18);
+    GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(root, 12);
+    gtk_widget_set_margin_bottom(root, 12);
+    gtk_widget_set_margin_start(root, 14);
+    gtk_widget_set_margin_end(root, 14);
     gtk_window_set_child(GTK_WINDOW(app->window), root);
 
     GtkWidget *title = gtk_label_new("staticbus / software telemetry");
@@ -563,10 +563,23 @@ void activate(GtkApplication *application, gpointer user_data)
     gtk_box_append(GTK_BOX(root), app->status);
 
     GtkWidget *grid = gtk_grid_new();
-    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
-    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
-    gtk_widget_set_vexpand(grid, TRUE);
-    gtk_box_append(GTK_BOX(root), grid);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
+
+    /*
+     * Some tiling window managers or short displays allocate less height than
+     * the natural combined height of all metric cards. Keep the title/status
+     * visible and allow the cards to scroll instead of asking the toplevel for
+     * a height larger than the available work area.
+     */
+    GtkWidget *grid_scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(grid_scroll),
+                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(grid_scroll), 0);
+    gtk_widget_set_vexpand(grid_scroll, TRUE);
+    gtk_widget_set_hexpand(grid_scroll, TRUE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(grid_scroll), grid);
+    gtk_box_append(GTK_BOX(root), grid_scroll);
     gtk_grid_attach(GTK_GRID(grid), make_metric("Memory-controller reads", &app->imc_read_label), 0, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), make_metric("Memory-controller writes", &app->imc_write_label), 1, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), make_metric("CPU cache misses", &app->cache_label), 0, 1, 1, 1);
