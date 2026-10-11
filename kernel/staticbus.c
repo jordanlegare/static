@@ -228,7 +228,7 @@ static const struct file_operations sb_fops = {
     .poll = sb_poll,
     .unlocked_ioctl = sb_ioctl,
 #ifdef CONFIG_COMPAT
-    .compat_ioctl = sb_ioctl,
+    .compat_ioctl = compat_ptr_ioctl,
 #endif
     .llseek = no_llseek,
 };
