@@ -108,7 +108,10 @@ These are two separate data paths and two separate applications. The telemetry a
 | `kernel/staticbus.c` | Character-device FIFO module | Implemented |
 | `include/staticbus_ioctl.h` | ABI for `/dev/staticbus0` stats ioctl | Implemented |
 | `frontend/staticbus-gtk.cpp` | GTK byte-stream viewer | Implemented |
-| `frontend/staticbus-telemetry-gtk.cpp` | No-probe PMU/host telemetry dashboard | Implemented prototype |
+| `frontend/staticbus-telemetry-gtk.cpp` | Native no-probe PMU/host telemetry dashboard | Implemented prototype |
+| `telemetry-web/server.js` | Local Node.js server, perf JSON collector, SSE updates and host telemetry | Implemented prototype |
+| `telemetry-web/public/` | Responsive live line charts and status panels | Implemented prototype |
+| `telemetry-web/package.json` | Node.js start and syntax-check scripts | Implemented |
 | `tools/staticbus-replay.cpp` | Binary file-to-device replay tool | Implemented |
 | `include/staticbus_capture_uapi.h` | Proposed high-throughput hardware capture UAPI | Design only |
 | `docs/SOFTWARE_ONLY_CAPTURE.md` | No-probe telemetry architecture and limits | Documentation |
@@ -171,6 +174,28 @@ Clean build products:
 
 ```sh
 make clean
+```
+
+## Live web dashboard (Node.js)
+
+For a responsive browser-based interface with dedicated live line charts, use the optional dependency-free Node.js dashboard in `telemetry-web/`. It runs locally, starts `perf stat` at one-second intervals, and streams updates to the page using Server-Sent Events. The charts show memory-controller reads and writes using perf's reported event unit/scale, CPU cache-miss rate, and aggregate interrupt rate. Separate status fields report Intel PT availability and EDAC error counters when exposed.
+
+Requirements: Node.js 18 or later, Linux `perf`, and permission to open the selected perf events. No `npm install` is needed.
+
+```sh
+cd telemetry-web
+npm start
+# Open http://127.0.0.1:8090 in your browser
+```
+
+Or run `node server.js` directly. The service binds to `127.0.0.1` by default; override the port with `STATICBUS_WEB_PORT=8091` if needed. Use `PERF_BIN` to select a non-default perf executable. The Start/Stop buttons control the `perf stat` collector. Stop the server with Ctrl+C.
+
+The dashboard is intentionally localhost-only and has no external JavaScript or charting dependencies. It does not expose a general command execution API. Perf's JSON interval output supplies PMU samples; `/proc/stat` supplies aggregate interrupt counts; EDAC values are read from sysfs. A chart reflects these sampled metrics, not individual DRAM transactions or raw DDR signal bytes. If counters do not appear, review the diagnostic panel and run the same `perf stat` command from a terminal with the required permissions.
+
+Check source syntax with:
+
+```sh
+npm run check
 ```
 
 ## Run: software-only telemetry
