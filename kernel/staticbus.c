@@ -230,7 +230,7 @@ static const struct file_operations sb_fops = {
 #ifdef CONFIG_COMPAT
     .compat_ioctl = compat_ptr_ioctl,
 #endif
-    .llseek = no_llseek,
+    .llseek = noop_llseek,
 };
 
 static int __init sb_init(void)
