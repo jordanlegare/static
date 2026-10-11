@@ -291,14 +291,18 @@ void open_uncore_metric(Metric& metric, const std::string& event_name)
             metric.detail = pmu_name + ": no PMU cpumask/cpus file";
             continue;
         }
-        for (int cpu : cpus) {
-            CounterFd counter;
-            std::string open_error;
-            if (enable_event(attr, cpu, counter, open_error)) {
-                metric.counters.push_back(std::move(counter));
-            } else if (metric.detail.empty()) {
-                metric.detail = pmu_name + " CPU " + std::to_string(cpu) + ": " + open_error;
-            }
+        /*
+         * Uncore PMU directories represent hardware instances. Open once on
+         * the first representative CPU in that instance's cpumask; opening on
+         * every CPU in the mask can double-count a shared uncore counter.
+         */
+        const int cpu = cpus.front();
+        CounterFd counter;
+        std::string open_error;
+        if (enable_event(attr, cpu, counter, open_error)) {
+            metric.counters.push_back(std::move(counter));
+        } else if (metric.detail.empty()) {
+            metric.detail = pmu_name + " CPU " + std::to_string(cpu) + ": " + open_error;
         }
     }
 
