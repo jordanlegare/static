@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>staticbus · Live telemetry</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="staticbus home">
+        <span class="brand-mark"><span></span><span></span><span></span><span></span></span>
+        <span><strong>staticbus</strong><small>HOST TELEMETRY</small></span>
+      </a>
+      <div class="topbar-right">
+        <span class="live-pill"><span id="connection-dot" class="dot"></span><span id="connection-text">Connecting</span></span>
+        <button id="start-button" class="button button-quiet" type="button">Start</button>
+        <button id="stop-button" class="button button-danger" type="button">Stop</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">LIVE SYSTEM OBSERVABILITY</p>
+          <h1>Memory activity, <span>in motion.</span></h1>
+          <p class="hero-copy">Real-time readings from Linux perf counters and host telemetry. No probes required.</p>
+        </div>
+        <div class="hero-stats">
+          <div><span class="mini-label">COLLECTOR</span><strong id="collector-status">Starting</strong></div>
+          <div><span class="mini-label">SAMPLE WINDOW</span><strong>1 second</strong></div>
+        </div>
+      </section>
+
+      <section class="notice" aria-label="Scope note">
+        <span class="notice-icon">i</span>
+        <p>PMU counters measure memory-system activity; they do not expose raw DDR bus bytes or reconstruct lost transactions.</p>
+      </section>
+
+      <section class="section-head">
+        <div><p class="eyebrow">BANDWIDTH / EVENT RATE</p><h2>Live signals</h2></div>
+        <span id="updated-at" class="updated">Waiting for first sample</span>
+      </section>
+
+      <section class="metric-grid" aria-label="Live metric charts">
+        <article class="metric-card metric-primary" data-metric="reads">
+          <div class="metric-heading"><div><span class="metric-kicker">MEMORY CONTROLLER</span><h3>Read traffic</h3></div><span class="metric-icon">R</span></div>
+          <div class="metric-value-row"><strong id="value-reads" class="metric-value">—</strong><span id="unit-reads" class="metric-unit">MiB/s</span></div>
+          <p id="detail-reads" class="metric-detail">Waiting for perf event</p>
+          <canvas id="chart-reads" class="chart" aria-label="Memory controller read traffic over time"></canvas>
+          <div class="chart-axis"><span>90 samples</span><span>Now</span></div>
+        </article>
+
+        <article class="metric-card metric-write" data-metric="writes">
+          <div class="metric-heading"><div><span class="metric-kicker">MEMORY CONTROLLER</span><h3>Write traffic</h3></div><span class="metric-icon">W</span></div>
+          <div class="metric-value-row"><strong id="value-writes" class="metric-value">—</strong><span id="unit-writes" class="metric-unit">MiB/s</span></div>
+          <p id="detail-writes" class="metric-detail">Waiting for perf event</p>
+          <canvas id="chart-writes" class="chart" aria-label="Memory controller write traffic over time"></canvas>
+          <div class="chart-axis"><span>90 samples</span><span>Now</span></div>
+        </article>
+
+        <article class="metric-card metric-cache" data-metric="cacheMisses">
+          <div class="metric-heading"><div><span class="metric-kicker">CORE PMU</span><h3>Cache misses</h3></div><span class="metric-icon">C</span></div>
+          <div class="metric-value-row"><strong id="value-cacheMisses" class="metric-value">—</strong><span id="unit-cacheMisses" class="metric-unit">events/s</span></div>
+          <p id="detail-cacheMisses" class="metric-detail">Waiting for perf event</p>
+          <canvas id="chart-cacheMisses" class="chart" aria-label="CPU cache misses over time"></canvas>
+          <div class="chart-axis"><span>90 samples</span><span>Now</span></div>
+        </article>
+
+        <article class="metric-card metric-irq" data-metric="interrupts">
+          <div class="metric-heading"><div><span class="metric-kicker">KERNEL</span><h3>Interrupt activity</h3></div><span class="metric-icon">I</span></div>
+          <div class="metric-value-row"><strong id="value-interrupts" class="metric-value">—</strong><span id="unit-interrupts" class="metric-unit">interrupts/s</span></div>
+          <p id="detail-interrupts" class="metric-detail">Sampling /proc/stat</p>
+          <canvas id="chart-interrupts" class="chart" aria-label="Aggregate host interrupts over time"></canvas>
+          <div class="chart-axis"><span>90 samples</span><span>Now</span></div>
+        </article>
+      </section>
+
+      <section class="section-head section-subhead">
+        <div><p class="eyebrow">PLATFORM STATUS</p><h2>Capabilities &amp; errors</h2></div>
+      </section>
+      <section class="status-grid">
+        <article class="status-card"><span class="status-label">INTEL PROCESSOR TRACE</span><strong id="pt-status">Checking…</strong><p>Availability detection only; recording is not started by this dashboard.</p></article>
+        <article class="status-card"><span class="status-label">EDAC MEMORY ERRORS</span><strong id="edac-status">Checking…</strong><p id="edac-detail">Uses active kernel EDAC counters when exposed.</p><div class="error-totals"><span>Correctable <b id="value-correctable">—</b></span><span>Uncorrectable <b id="value-uncorrectable">—</b></span></div></article>
+        <article class="status-card status-wide"><span class="status-label">COLLECTOR DIAGNOSTICS</span><strong id="diagnostic-title">Initialising perf</strong><p id="diagnostic-detail">Starting perf stat and discovering available events.</p></article>
+      </section>
+
+      <footer>
+        <span>staticbus / local dashboard</span>
+        <span>Bound to loopback · no external JS dependencies</span>
+        <a href="https://github.com/jordanlegare/static">Source on GitHub ↗</a>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>
