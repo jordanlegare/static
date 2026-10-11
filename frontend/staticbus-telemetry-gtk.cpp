@@ -420,27 +420,6 @@ gboolean sample_metrics(gpointer data)
         elapsed = std::max(0.001, static_cast<double>(now - app->last_tick_us) / 1'000'000.0);
     app->last_tick_us = now;
 
-    auto sample = [elapsed](Metric& metric) {
-        if (!metric.available) return;
-        bool ok = false;
-        const std::uint64_t current = read_scaled_total(metric, ok);
-        if (!ok) {
-            metric.available = false;
-            metric.detail = "Counter read failed; permission or device state changed";
-            return;
-        }
-        if (metric.initialized) {
-            const std::uint64_t delta = current >= metric.rate ? current - metric.rate : 0;
-            const long double per_second = static_cast<long double>(delta) / elapsed;
-            metric.rate = per_second > static_cast<long double>(UINT64_MAX)
-                        ? UINT64_MAX : static_cast<std::uint64_t>(per_second);
-        } else {
-            metric.rate = current;
-            metric.initialized = true;
-        }
-        // Store the current scaled cumulative count separately in the detail field
-        // is intentionally avoided; 'rate' is updated below using a dedicated static map.
-    };
 
     // Per-metric sample baselines, kept independently from the displayed rate.
     static std::map<std::string, std::uint64_t> previous_counts;
@@ -556,14 +535,12 @@ void activate(GtkApplication *application, gpointer user_data)
     gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
     gtk_widget_set_vexpand(grid, TRUE);
     gtk_box_append(GTK_BOX(root), grid);
-    GtkWidget *a{}, *b{}, *c{}, *d{}, *e{}, *f{};
     gtk_grid_attach(GTK_GRID(grid), make_metric("Memory-controller reads", &app->imc_read_label), 0, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), make_metric("Memory-controller writes", &app->imc_write_label), 1, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), make_metric("CPU cache misses", &app->cache_label), 0, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), make_metric("Interrupt activity", &app->irq_label), 1, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), make_metric("Intel Processor Trace", &app->pt_label), 0, 2, 2, 1);
     gtk_grid_attach(GTK_GRID(grid), make_metric("Memory error reporting", &app->edac_label), 0, 3, 2, 1);
-    (void)a; (void)b; (void)c; (void)d; (void)e; (void)f;
 
     std::error_code ec;
     if (fs::exists(fs::path(kPmuRoot) / "uncore_imc", ec)) {
