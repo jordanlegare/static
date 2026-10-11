@@ -226,9 +226,19 @@ bool build_pmu_attr(const fs::path& pmu_path, const std::string& event_name,
 
     for (const auto& item : split(alias, ',')) {
         const auto equals = item.find('=');
-        if (equals == std::string::npos) continue;
-        const std::string key = trim(item.substr(0, equals));
-        const std::string raw_value = trim(item.substr(equals + 1));
+        /*
+         * Linux PMU event aliases follow the perf sysfs grammar: a bare field
+         * name is an implicit value of 1 (for example, "edge" or "inv").
+         * Dropping these flags can configure a different raw event than perf
+         * itself opens, and some hardware rejects that configuration with
+         * EINVAL.
+         */
+        const std::string key = trim(equals == std::string::npos
+                                     ? item : item.substr(0, equals));
+        const std::string raw_value = equals == std::string::npos
+                                     ? "1" : trim(item.substr(equals + 1));
+        if (key.empty()) continue;
+
         std::uint64_t value = 0;
         if (!parse_u64(raw_value, value)) {
             error = "Cannot parse event alias field " + key;
@@ -319,8 +329,10 @@ void open_uncore_metric(Metric& metric, const std::string& event_name)
         std::string open_error;
         if (enable_event(attr, cpu, counter, open_error)) {
             metric.counters.push_back(std::move(counter));
-        } else if (metric.detail.empty()) {
-            metric.detail = pmu_name + " CPU " + std::to_string(cpu) + ": " + open_error;
+        } else {
+            metric.detail = event_name + " alias [" + read_text(entry.path() / "events" / event_name) +
+                            "] on " + pmu_name + " CPU " + std::to_string(cpu) +
+                            ": " + open_error;
         }
     }
 
