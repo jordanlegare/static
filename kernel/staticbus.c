@@ -91,21 +91,24 @@ static ssize_t sb_read(struct file *file, char __user *user_buf,
 
     for (;;) {
         mutex_lock(&sb_lock);
-        copied = kfifo_out(&sb_fifo, tmp,
-                           min_t(size_t, count, PAGE_SIZE));
-        if (copied)
+        copied = kfifo_out_peek(&sb_fifo, tmp,
+                                min_t(size_t, count, PAGE_SIZE));
+        if (copied) {
+            /* Do not consume bytes until the user copy has succeeded. */
+            if (copy_to_user(user_buf, tmp, copied)) {
+                mutex_unlock(&sb_lock);
+                kfree(tmp);
+                return -EFAULT;
+            }
+            kfifo_skip_count(&sb_fifo, copied);
             sb_bytes_read += copied;
+        }
         mutex_unlock(&sb_lock);
 
         if (copied) {
-            if (copy_to_user(user_buf, tmp, copied)) {
-                result = -EFAULT;
-            } else {
-                result = (ssize_t)copied;
-            }
             wake_up_interruptible(&sb_writeq);
             kfree(tmp);
-            return result;
+            return (ssize_t)copied;
         }
 
         if (file->f_flags & O_NONBLOCK) {
