@@ -55,7 +55,7 @@ This provides error telemetry, not a universal detector for every electrical dis
 
 ## Recommended implementation for staticbus
 
-Keep the existing /dev/staticbus0 FIFO for synthetic-data testing and replay. The new frontend/staticbus-telemetry-gtk.cpp prototype is a separate no-probe GTK application that samples supported uncore_imc data_reads/data_writes aliases using perf_event_open, a CPU cache-misses counter, the interrupt total from /proc/stat, Intel PT availability, and active EDAC sysfs counters. It deliberately reports raw PMU event counts per second rather than guessing that a counter equals bytes. It does not yet collect/decode an Intel PT trace; those recordings are an explicit perf workflow.
+Keep the existing /dev/staticbus0 FIFO for synthetic-data testing and replay. The new frontend/staticbus-telemetry-gtk.cpp prototype is a separate no-probe GTK application that samples supported uncore_imc data_reads/data_writes aliases using perf_event_open, a CPU cache-misses counter, the interrupt total from /proc/stat, Intel PT availability, and active EDAC sysfs counters. For PMU events, it reads the exported .scale/.unit metadata and applies the scale to the measured rate; if metadata is not available, it presents raw event counts per second. It does not assume all event counts are bytes. It does not yet collect/decode an Intel PT trace; those recordings are an explicit perf workflow.
 
 Suggested normalized record:
 
