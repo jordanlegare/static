@@ -1,150 +1,228 @@
 # staticbus
 
-`staticbus` is a Linux-kernel character-device bridge and GTK 4 desktop monitor for byte streams produced by an external bus-capture source. The kernel module exposes `/dev/staticbus0`; a trusted capture program writes captured bytes to the device, and the C++ GTK frontend reads and visualizes them.
+**staticbus** is a Linux/C++ project with two GTK 4 applications:
 
-> **Hardware limitation:** a normal Linux kernel module cannot passively read arbitrary electrical CPU package/bus pins on a modern PC. Most CPU-internal buses are not exposed as host-readable interfaces. Capturing physical bus activity requires compatible external hardware (such as an FPGA/logic analyzer) and a producer/driver that converts its samples into bytes. This project provides the kernel-to-GTK streaming path; it is not itself a physical bus probe or a CPU instrumentation tool.
+1. **Byte-stream monitor** — visualizes bytes written to the `/dev/staticbus0` character device by a producer or replay tool.
+2. **Software telemetry monitor** — reads selected CPU/memory-controller performance counters and host telemetry exposed by Linux, without external capture probes.
 
-## Capabilities
+The repository also contains a binary replay utility, a small kernel character-device module, a shared ioctl header, and design documents for possible future physical-bus capture hardware.
 
-### Implemented: byte-stream path
+> **Important scope limitation:** this code does not passively sample raw electrical CPU/DDR bus signals. A Linux module cannot generically access internal CPU buses or recover exact bytes that were lost on a physical bus. The no-probe telemetry app reports the machine's available counters and error telemetry; the byte-stream app displays data submitted to its character device. The hardware-backed capture interface described later is a proposal, not an implemented driver.
 
-- Linux character device `/dev/staticbus0` backed by a bounded kernel FIFO.
-- Blocking producer writes with backpressure when the FIFO is full; nonblocking consumer reads for a responsive UI.
-- `poll(2)` readiness and `STATICBUS_IOC_GET_STATS` for ABI version, FIFO capacity/occupancy, and byte counters.
-- C++/GTK 4 byte-stream monitor with a rolling 256-value byte-frequency histogram, recent hexadecimal bytes, queue occupancy, byte counters, Shannon entropy, and average changed bits per byte.
-- Binary capture replay utility for feeding known test data into the byte-stream path.
+## Current capabilities
 
-### Implemented: no-probe software telemetry
+### 1. Linux byte-stream device
 
-The separate `frontend/staticbus-telemetry-gtk` application uses interfaces already exposed by Linux and the host CPU. It currently attempts to collect:
+The `kernel/staticbus.c` module creates `/dev/staticbus0`, backed by a bounded kernel FIFO. A producer writes arbitrary bytes to the device; a consumer reads them.
 
-- **Memory-controller read/write PMU counters** from `uncore_imc/data_reads` and `uncore_imc/data_writes` through `perf_event_open`. When the PMU exports `.scale` and `.unit` metadata, the frontend applies that scale and labels the reported rate accordingly.
-- **CPU cache misses** using the standard hardware cache-misses event across online CPUs, where permitted.
-- **Aggregate host interrupt rate** by sampling the total interrupt count in `/proc/stat`. This is not a per-IRQ trace.
-- **EDAC memory error counters** from active `/sys/devices/system/edac/mc` controller `ce_count`/`ue_count` files, when present.
-- **Intel PT capability presence** by checking whether the `intel_pt` PMU is registered. The current GUI does not start, save, or decode an Intel PT recording.
+Implemented interfaces:
 
-Availability depends on the CPU, firmware, kernel configuration, PMU event aliases, and permissions. Unsupported counters are reported as unavailable rather than synthesized.
+- Blocking `write(2)` with backpressure when the FIFO is full.
+- Nonblocking `read(2)` support; an empty nonblocking read returns `EAGAIN`.
+- `poll(2)` readiness for readable data and writable FIFO space.
+- `STATICBUS_IOC_GET_STATS` to return ABI version, FIFO capacity, current occupancy, cumulative bytes written and cumulative bytes read.
+- Configurable FIFO size through the `buffer_size` module parameter (4 KiB through 16 MiB requested size, subject to kernel FIFO sizing).
 
-### Planned / design-only
+The device is a **raw byte FIFO**, not a framed protocol. Write boundaries are not preserved; the reader receives whatever amount is currently available. The module does not acquire bus samples itself, decode transactions, use DMA, register a hardware interrupt handler, or inspect CPU-internal signals.
 
-- A hardware-specific PCIe/FPGA driver with DMA capture rings and interrupt-driven acquisition.
-- The proposed `/dev/staticbus-capture0` UAPI in `include/staticbus_capture_uapi.h`.
-- Live tracefs IRQ-event collection and a managed Intel PT recording workflow.
-- Protocol-specific decoding of physical bus traces.
+### 2. GTK byte-stream monitor
 
-The first two hardware-capture items are architecture/design artifacts only; there is no PCIe/FPGA capture driver in this repository yet.
+`frontend/staticbus-gtk.cpp` is the GTK 4/C++ viewer for `/dev/staticbus0`. It:
+
+- Reconnects periodically when the device is unavailable.
+- Reads the device without blocking the GTK event loop.
+- Draws a byte-frequency histogram over a rolling 2,048-byte window.
+- Displays recent data as hexadecimal bytes.
+- Reports kernel FIFO occupancy/capacity and cumulative byte counters through the stats ioctl.
+- Computes Shannon entropy over the rolling byte window.
+- Computes the average number of changed bits between adjacent bytes in the displayed stream.
+- Provides **Pause view**, which pauses updating the displayed history while the app continues draining the FIFO, and **Clear view**, which clears its local visualization.
+
+The GUI is a general byte-stream viewer. Entropy and bit-transition measurements describe the submitted byte stream; they are not, by themselves, proof of electrical noise or missing bus data.
+
+### 3. No-probe software telemetry monitor
+
+`frontend/staticbus-telemetry-gtk.cpp` is a separate GTK 4/C++ app. It uses Linux interfaces and counters advertised by the current host:
+
+- **Memory-controller PMU counters:** attempts to open `uncore_imc/data_reads` and `uncore_imc/data_writes` through `perf_event_open(2)`. It reads event `.scale` and `.unit` metadata when exported by sysfs and applies the scale to the measured rate. The exact meaning and unit depend on the host's PMU event definition.
+- **CPU cache misses:** attempts to count the standard hardware cache-misses event across online CPUs, subject to kernel permissions and PMU availability.
+- **Aggregate host interrupts:** samples the total interrupt count in `/proc/stat` and displays its change per second. This is an aggregate count, not a per-interrupt trace or a byte stream.
+- **EDAC memory error counters:** reads `ce_count` and `ue_count` from active EDAC memory-controller directories when those files exist.
+- **Intel Processor Trace availability:** checks whether `/sys/bus/event_source/devices/intel_pt` exists. The app does **not** start, save, decode or analyze Intel PT recordings.
+
+The telemetry app reports unavailable sources when it cannot discover or open them. Event availability and interpretation depend on the CPU, firmware, kernel, PMU driver and permissions. A PMU counter can estimate activity or traffic, but it does not expose each raw DDR data byte.
+
+The no-probe frontend does not currently collect tracefs interrupt events, perform live Intel PT capture, or provide automatic recovery/reconstruction of missing data. Access to performance events can be restricted by `perf_event_paranoid` and other system security settings.
+
+### 4. Binary replay utility
+
+`tools/staticbus-replay.cpp` reads a binary file and writes it to the selected character device. It handles partial writes and interrupted system calls. It is useful for testing the byte-stream viewer without capture hardware.
+
+Usage:
+
+```sh
+./tools/staticbus-replay DEVICE CAPTURE.bin
+```
+
+For example, with the module loaded and correct device permissions:
+
+```sh
+./tools/staticbus-replay /dev/staticbus0 sample.bin
+```
+
+The utility does not parse capture file formats; it copies the file's bytes as-is.
 
 ## Architecture
 
+### Byte-stream path
+
 ```text
-Bus capture hardware (FPGA / logic analyzer)
+binary file / trusted producer
              |
-    hardware-specific producer
-             | write(2) byte stream
+             | write(2)
              v
-        /dev/staticbus0  <--- staticbus Linux kernel module
-             | read(2) + STATICBUS_IOC_GET_STATS
+       /dev/staticbus0
+       kernel FIFO module
+             |
+             | read(2) + GET_STATS ioctl
              v
-       staticbus-gtk (C++ / GTK 4)
+       staticbus-gtk
+       GTK 4 byte viewer
 ```
 
-The device is a byte FIFO, not a packet protocol: write boundaries are not preserved, and reads return whatever number of bytes is currently available. Use your capture source's own framing information if sample boundaries matter.
+### No-probe telemetry path
 
+```text
+Linux perf PMUs (when available) -----+
+/proc/stat aggregate interrupt count -+--> staticbus-telemetry-gtk
+EDAC sysfs error counters ------------+    GTK 4 telemetry dashboard
+Intel PT PMU availability check ------+
+```
 
-## Physical CPU/memory-bus capture (hardware-backed design)
+These are two separate data paths and two separate applications. The telemetry app does not send PMU data through `/dev/staticbus0`.
 
-The current `staticbus.ko` is a software-fed FIFO, not a physical bus probe. Capturing an external DDR memory interface requires a generation-compatible analyzer/interposer or a custom FPGA capture appliance with a validated high-speed probe front end, hardware buffering, sequence numbers, timestamps and hardware-overrun reporting. CPU-internal fabric signals are generally not exposed on ordinary external pins and cannot be captured by this module.
+## Repository layout
 
-The recommended next-stage architecture is a separate PCIe hardware driver with DMA block acquisition, MSI/MSI-X completion interrupts, and a read-only mmap ring for completed blocks. Loss must be recorded separately for hardware FIFO overruns, DMA overruns, host ring exhaustion, sequence gaps, CRC failures and clock unlock. A missing block must never be silently replaced by guessed bytes.
-
-See [`docs/PHYSICAL_CAPTURE_DESIGN.md`](docs/PHYSICAL_CAPTURE_DESIGN.md) for the capture architecture, hardware requirements, ring semantics, validation plan and kernel/userspace API. The draft interface is in [`include/staticbus_capture_uapi.h`](include/staticbus_capture_uapi.h). **That hardware-backed ABI is a design contract only; no PCIe/FPGA device driver implements it yet.** The existing `/dev/staticbus0` API remains for software-fed streams and replay.
-
-
-## Software-only capture (no external probes)
-
-For a machine-only workflow, use CPU and kernel telemetry rather than claiming to sample raw CPU/DDR wires. The currently implemented telemetry frontend reads the available perf/PMU counters listed above, samples aggregate interrupts from `/proc/stat`, checks for an `intel_pt` PMU, and reads active EDAC controller error counters where exposed. This reveals memory-controller activity, cache misses, host interrupt rate, Intel PT availability, and hardware-reported EDAC errors; it does **not** expose a literal byte stream from the physical DDR bus or reconstruct arbitrary missing bus bytes.
-
-See [`docs/SOFTWARE_ONLY_CAPTURE.md`](docs/SOFTWARE_ONLY_CAPTURE.md) for the no-probe architecture and inventory commands. The earlier [physical capture design](docs/PHYSICAL_CAPTURE_DESIGN.md) describes an optional external-hardware path. The separate `frontend/staticbus-telemetry-gtk` prototype reads supported `uncore_imc` read/write PMU counters through `perf_event_open`, CPU cache-miss counters, the global interrupt count from `/proc/stat`, Intel PT availability, and active EDAC counters. It applies each PMU event's exported `.scale` and `.unit` metadata when available (for example, reporting MiB/s if the host exports MiB units); counters without unit metadata remain event counts/sec. Tracefs collection and live Intel PT recording are not implemented in this first version.
+| Path | Purpose | Status |
+|---|---|---|
+| `kernel/staticbus.c` | Character-device FIFO module | Implemented |
+| `include/staticbus_ioctl.h` | ABI for `/dev/staticbus0` stats ioctl | Implemented |
+| `frontend/staticbus-gtk.cpp` | GTK byte-stream viewer | Implemented |
+| `frontend/staticbus-telemetry-gtk.cpp` | No-probe PMU/host telemetry dashboard | Implemented prototype |
+| `tools/staticbus-replay.cpp` | Binary file-to-device replay tool | Implemented |
+| `include/staticbus_capture_uapi.h` | Proposed high-throughput hardware capture UAPI | Design only |
+| `docs/SOFTWARE_ONLY_CAPTURE.md` | No-probe telemetry architecture and limits | Documentation |
+| `docs/PHYSICAL_CAPTURE_DESIGN.md` | Optional external capture hardware design | Documentation only |
+| `Makefile` and component Makefiles | Build and clean targets | Implemented |
 
 ## Requirements
 
-- Linux kernel headers for the running kernel (`linux-headers-$(uname -r)` on Debian/Ubuntu).
-- A C/C++ toolchain, `make`, and `pkg-config`.
-- GTK 4 development files (`libgtk-4-dev` on Debian/Ubuntu).
-- Permissions to load kernel modules and open the character device.
-
-On Debian/Ubuntu:
+For Debian/Ubuntu:
 
 ```sh
 sudo apt update
-sudo apt install build-essential pkg-config linux-headers-$(uname -r) libgtk-4-dev
+sudo apt install build-essential g++ make pkg-config \
+    linux-headers-$(uname -r) libgtk-4-dev
 ```
+
+- A running Linux system and kernel headers matching the target kernel for the kernel module.
+- A C++17 compiler, GNU make and `pkg-config`.
+- GTK 4 development files for both GUI applications.
+- Permission to load kernel modules for the byte-stream device.
+- Permission to open the requested perf events for the software telemetry app.
+
+You do not need to load the kernel module to run `staticbus-telemetry-gtk`; it reads the host's perf/sysfs/`/proc/stat` sources directly.
 
 ## Build
 
-From the repository root:
+Build all current components from the repository root:
 
 ```sh
 make
 ```
 
-Or build parts individually:
+This builds the kernel module, both GTK applications, and the replay utility. The kernel component uses `/lib/modules/$(uname -r)/build` by default.
+
+Build only the telemetry GUI (no kernel headers or module load needed):
 
 ```sh
-make -C kernel
-make -C frontend
+make -C frontend staticbus-telemetry-gtk
+```
+
+Build the byte-stream GUI:
+
+```sh
+make -C frontend staticbus-gtk
+```
+
+Build the replay utility:
+
+```sh
 make -C tools
 ```
 
-The kernel module is built against `/lib/modules/$(uname -r)/build`. If your target kernel differs, pass `KDIR=/path/to/kernel/build` to `make -C kernel`.
+If the module should target a different kernel build tree, pass `KDIR` to the kernel make invocation, for example:
 
-### Run the software-only telemetry frontend
+```sh
+make -C kernel KDIR=/path/to/kernel/build
+```
 
-Build the GTK applications with `make -C frontend`, then launch:
+Clean build products:
+
+```sh
+make clean
+```
+
+## Run: software-only telemetry
+
+Launch the no-probe monitor:
 
 ```sh
 ./frontend/staticbus-telemetry-gtk
 ```
 
-The live dashboard attempts to open the host's `uncore_imc/data_reads`, `uncore_imc/data_writes` and CPU cache-misses perf events. Perf permissions and PMU implementation vary by host. If counters are unavailable, check:
+The dashboard attempts to open PMU events exported by the running kernel and samples the aggregate interrupt count and EDAC counters. If a source is missing or not permitted, its panel reports that the source is unavailable. The Intel PT panel only reports whether a PMU is present; it does not perform a recording.
+
+### Verify memory-controller PMU access
+
+The actual event aliases are host-specific. To test the same type of counters shown by the frontend, run:
 
 ```sh
-cat /proc/sys/kernel/perf_event_paranoid
-sudo perf stat -a -I 1000 -e uncore_imc/data_reads/,uncore_imc/data_writes/ -- sleep 5
+perf list | grep -Ei 'intel_pt|uncore_imc|cache-misses'
+sudo perf stat -a -I 1000 \
+  -e uncore_imc/data_reads/,uncore_imc/data_writes/ \
+  -- sleep 5
 ```
 
-Use the short `perf stat` command to verify that the kernel can open the memory-controller counters. Avoid running a whole desktop session as root just to bypass perf permissions. Intel PT is only identified as available by the dashboard; a separate, short, intentional `perf record -e intel_pt//` session is needed to create execution-trace data, and that data is not a raw DDR capture.
+If `perf stat` works with elevated privileges but the GUI does not, the GUI may lack permission to open the system-wide events. Do not run the entire desktop session as root just to work around perf permissions; follow your distribution's security and access-control policy instead.
 
-## Load the kernel module
+The exported PMU event `.scale` and `.unit` files describe how the platform's event value is represented. Do not interpret a counter as exact physical bytes unless the event documentation defines that unit and scope.
+
+## Run: byte-stream device
+
+Load the module after building it:
 
 ```sh
 sudo insmod kernel/staticbus.ko
 ls -l /dev/staticbus0
+dmesg | tail
 ```
 
-The default FIFO is 64 KiB. To request a different capacity (the module FIFO rounds to a supported capacity), pass a `buffer_size` parameter between 4096 and 16777216 bytes:
+The default requested FIFO size is 64 KiB. To request a different size between 4 KiB and 16 MiB:
 
 ```sh
 sudo insmod kernel/staticbus.ko buffer_size=262144
 ```
 
-Check kernel messages with `dmesg | tail`. The module creates a character device with the device-node permissions supplied by the system's devtmpfs/udev rules. For desktop use, configure a dedicated udev rule and group rather than running the GUI as root. Example rule (review the group choice for your host):
+The kernel FIFO may round the requested size to a supported capacity; check the module log or stats ioctl for the actual capacity. Device-node ownership and permissions depend on the host's devtmpfs/udev configuration. For normal desktop use, prefer a dedicated group/udev rule with minimal permissions instead of running the GUI as root or making the device world-writable.
 
-```text
-# /etc/udev/rules.d/70-staticbus.rules
-KERNEL=="staticbus0", GROUP="plugdev", MODE="0660"
-```
-
-Then reload rules and re-trigger the device, or unload/reload the module. Confirm the actual group exists on your distribution before applying the rule.
-
-## Run the GTK frontend
+Launch the viewer:
 
 ```sh
 ./frontend/staticbus-gtk
 ```
 
-The default device is `/dev/staticbus0`. Override it with either form:
+The viewer uses `/dev/staticbus0` by default. A different path can be selected with either:
 
 ```sh
 ./frontend/staticbus-gtk --device /dev/staticbus0
@@ -152,61 +230,83 @@ The default device is `/dev/staticbus0`. Override it with either form:
 STATICBUS_DEVICE=/dev/staticbus0 ./frontend/staticbus-gtk
 ```
 
-The UI reconnects periodically if the device is not yet available. “Pause view” pauses the displayed history while continuing to drain the kernel FIFO so a producer is not stalled; “Clear view” clears only the current visualization, not kernel counters or buffered data.
+The option is useful for testing with another compatible character device, but the viewer expects the staticbus stats ioctl for its kernel statistics panel.
 
-## Smoke test without hardware
+## Smoke test the byte-stream viewer
 
-Generate a small binary test stream and replay it into the device while the GUI is running:
+After loading the module, create a repeatable binary pattern:
 
 ```sh
 python3 - <<'PY'
 from pathlib import Path
-# Repeated ranges plus deterministic noisy bytes for a visible histogram.
-Path("sample.bin").write_bytes(bytes(range(256)) * 8 + bytes((i * 73 + 19) % 256 for i in range(2048)))
+pattern = bytes(range(256)) * 8
+noisy = bytes((i * 73 + 19) % 256 for i in range(2048))
+Path("sample.bin").write_bytes(pattern + noisy)
+print("Wrote sample.bin")
 PY
-sudo ./tools/staticbus-replay /dev/staticbus0 sample.bin
 ```
 
-`staticbus-replay` reads a binary file and writes it to the kernel FIFO. It applies backpressure if the GTK frontend is not draining bytes. The replay utility requires write permission on the device; use a group/udev rule where appropriate instead of making the device world-writable.
+Then open the GTK byte viewer and replay the file:
 
-For a quick one-off test without the replay tool, another process can write binary data to `/dev/staticbus0`. Do not send terminal text to a live hardware device unless that is intended.
+```sh
+./frontend/staticbus-gtk
+```
 
-## Kernel/userspace API
+In another terminal:
+
+```sh
+./tools/staticbus-replay /dev/staticbus0 sample.bin
+```
+
+Use `sudo` for the replay command only if the device permissions require it. The replay writer blocks when the kernel FIFO is full until the consumer frees space.
+
+## Current kernel/userspace API
 
 Header: [`include/staticbus_ioctl.h`](include/staticbus_ioctl.h)
 
-| Interface | Meaning |
+The existing device supports:
+
+| Interface | Behavior |
 |---|---|
-| `open("/dev/staticbus0", O_WRONLY)` | Open the producer side. |
-| `write(fd, bytes, length)` | Enqueue raw captured bytes. Blocking when the FIFO is full; partial writes are possible. |
-| `open("/dev/staticbus0", O_RDONLY)` | Open the consumer side. |
-| `read(fd, buffer, length)` | Drain available bytes. Returns `-EAGAIN` for an empty nonblocking read. |
-| `poll(2)` | Reports readable data and writable FIFO capacity. |
-| `ioctl(fd, STATICBUS_IOC_GET_STATS, &stats)` | Obtain ABI version, queue capacity/occupancy, bytes written, and bytes read. |
+| `open("/dev/staticbus0", O_WRONLY)` | Open producer side |
+| `write(fd, data, length)` | Enqueue bytes; blocking with backpressure unless opened nonblocking |
+| `open("/dev/staticbus0", O_RDONLY)` | Open consumer side |
+| `read(fd, buffer, length)` | Consume available bytes; an empty nonblocking read returns `EAGAIN` |
+| `poll(2)` | Readable when data exists; writable while FIFO has room |
+| `ioctl(fd, STATICBUS_IOC_GET_STATS, &stats)` | Retrieve ABI version, FIFO capacity/occupancy and cumulative byte counts |
 
-`struct staticbus_stats` is the stable versioned stats structure. The ioctl is declared with `_IOR('S', 0x01, struct staticbus_stats)`. The frontend uses the same public header, avoiding a private layout duplicated in C++.
+`struct staticbus_stats` includes `abi_version`, `buffer_capacity`, `buffer_used`, `bytes_written` and `bytes_read`. The ioctl uses `_IOR('S', 0x01, struct staticbus_stats)`.
 
-### Data access and safety
+The current device API does not implement capture configuration, hardware trigger controls, DMA, a memory-mapped capture ring, raw CPU trace acquisition, or recovery commands.
 
-The character device is a privileged interface: processes with write access can submit arbitrary bytes to the stream, and a slow or absent reader can backpressure blocking writers. Restrict access to a trusted group. The module does not access physical memory, DMA, model-specific registers, or undocumented CPU interfaces. It only buffers byte sequences submitted through its device node.
+## Future physical-bus capture design
 
-## Unload and clean
+`include/staticbus_capture_uapi.h` defines a **proposed** interface for a potential hardware-backed high-throughput capture driver, including capability discovery, capture configuration, start/stop, status counters, block descriptors and consume acknowledgement. No PCIe/FPGA driver currently implements that header, and the current `staticbus.ko` does not use it.
 
-Close the frontend and stop producers, then unload the module:
+Physical capture of an external DDR interface requires compatible acquisition hardware/interposer and a validated high-speed probe front end. CPU-internal buses are generally not exposed to normal software. See [`docs/PHYSICAL_CAPTURE_DESIGN.md`](docs/PHYSICAL_CAPTURE_DESIGN.md) for the design constraints and loss-detection model.
 
-```sh
-sudo rmmod staticbus
-make clean
-```
+## Limitations and data interpretation
+
+- A memory-controller PMU counter is not a dump of raw DDR bytes or transaction contents.
+- Aggregate interrupt counts from `/proc/stat` do not identify a particular IRQ handler and do not represent lost bus bytes.
+- Discovering an Intel PT PMU does not mean the frontend is collecting an Intel PT trace.
+- EDAC counters appear only if the platform and kernel driver expose them; no counters does not prove the absence of memory errors.
+- The byte viewer only analyzes data written into `/dev/staticbus0`. It does not synthesize data from CPU hardware or discover lost bytes.
+- Entropy, histograms and bit transitions can characterize an input stream, but they cannot by themselves determine why a byte is unusual.
+- Missing data cannot be reconstructed reliably unless an underlying source or protocol provides enough redundancy, ECC, retransmission, or other recovery information.
 
 ## Troubleshooting
 
-- **`/dev/staticbus0` missing:** check `sudo dmesg | tail`, confirm the module is loaded with `lsmod | grep staticbus`, and inspect your devtmpfs/udev setup.
-- **`insmod: Invalid module format`:** build against the exact target kernel headers and check `uname -r`.
-- **Permission denied:** check the device's owner/group/mode; do not default to world-writable permissions.
-- **The GUI shows no bytes:** start a producer or replay a capture file. The module does not synthesize physical bus data by itself.
-- **Build failure in GTK frontend:** ensure `pkg-config --modversion gtk4` succeeds and install GTK 4 development headers.
+- **`/dev/staticbus0` is missing:** check `lsmod | grep staticbus`, `dmesg | tail`, and your devtmpfs/udev setup.
+- **Module build fails:** install headers matching `uname -r`; use `KDIR=/path/to/kernel/build` only when that tree matches the target kernel.
+- **Telemetry counters say unavailable:** inspect `perf list`, `/sys/bus/event_source/devices/` and `/proc/sys/kernel/perf_event_paranoid`. Permissions and event aliases vary by host.
+- **Memory counters work under `sudo perf stat` but not in the GUI:** the GUI process may lack perf permissions. Avoid running the whole desktop as root.
+- **EDAC reports no active counters:** the running kernel/platform may not expose an EDAC memory-controller instance.
+- **Byte viewer shows no data:** run a producer or `staticbus-replay`; the kernel module does not generate bus samples itself.
+- **GTK build fails:** confirm `pkg-config --modversion gtk4` succeeds and that GTK 4 development headers are installed.
 
-## Status
+## Project status
 
-Prototype/reference implementation. Test the module against your target kernel before deployment. A real bus acquisition workflow still needs a hardware-specific capture source and a documented sample format (including clocking, width, edge selection, and any framing metadata).
+This repository currently contains a prototype byte-stream FIFO module, two GTK 4 frontends, a binary replay utility, a shared stats ioctl header, and documentation/design artifacts. The software telemetry frontend is an initial implementation and does not yet collect tracefs event streams or record Intel PT data. Hardware-backed physical-bus capture remains design-only.
+
+Kernel code is marked SPDX GPL-2.0; the userspace source files are marked SPDX GPL-2.0-or-later; the current ioctl header uses GPL-2.0 with the Linux syscall-note exception. Review the individual source headers for applicable licensing.
