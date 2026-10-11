@@ -38,6 +38,13 @@ The recommended next-stage architecture is a separate PCIe hardware driver with 
 
 See [`docs/PHYSICAL_CAPTURE_DESIGN.md`](docs/PHYSICAL_CAPTURE_DESIGN.md) for the capture architecture, hardware requirements, ring semantics, validation plan and kernel/userspace API. The draft interface is in [`include/staticbus_capture_uapi.h`](include/staticbus_capture_uapi.h). **That hardware-backed ABI is a design contract only; no PCIe/FPGA device driver implements it yet.** The existing `/dev/staticbus0` API remains for software-fed streams and replay.
 
+
+## Software-only capture (no external probes)
+
+For a machine-only workflow, use CPU and kernel telemetry rather than claiming to sample raw CPU/DDR wires. Depending on the platform and kernel, data sources may include Linux interrupt tracepoints, perf/PMU counters, Intel Processor Trace or vendor equivalents, and EDAC/RAS/MCE memory-error reports. These reveal execution flow, aggregate performance events, interrupt activity and hardware-reported errors; they do **not** expose a literal byte stream from the physical DDR bus or reconstruct arbitrary missing bus bytes.
+
+See [`docs/SOFTWARE_ONLY_CAPTURE.md`](docs/SOFTWARE_ONLY_CAPTURE.md) for the no-probe architecture and inventory commands. The earlier [physical capture design](docs/PHYSICAL_CAPTURE_DESIGN.md) describes an optional external-hardware path. The existing GTK app and `/dev/staticbus0` FIFO currently visualize software-fed/replayed bytes; neither implementation yet collects perf/tracefs/EDAC telemetry as a live no-probe backend.
+
 ## Requirements
 
 - Linux kernel headers for the running kernel (`linux-headers-$(uname -r)` on Debian/Ubuntu).
