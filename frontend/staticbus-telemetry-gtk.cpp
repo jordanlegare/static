@@ -63,7 +63,7 @@ struct Metric {
     std::vector<CounterFd> counters;
     double rate{0.0};
     double unit_scale{1.0};
-    std::string display_unit{"events/s"};
+    std::string display_unit{"events"};
     bool available{false};
     bool initialized{false};
 };
@@ -77,9 +77,9 @@ struct App {
     GtkWidget *irq_label{};
     GtkWidget *pt_label{};
     GtkWidget *edac_label{};
-    Metric imc_reads{"IMC data_reads", "uncore_imc", "", {}, 0, false, false};
-    Metric imc_writes{"IMC data_writes", "uncore_imc", "", {}, 0, false, false};
-    Metric cache_misses{"CPU cache misses", "cpu", "", {}, 0, false, false};
+    Metric imc_reads{"IMC data_reads", "uncore_imc", "", {}, 0.0, 1.0, "events", false, false};
+    Metric imc_writes{"IMC data_writes", "uncore_imc", "", {}, 0.0, 1.0, "events", false, false};
+    Metric cache_misses{"CPU cache misses", "cpu", "", {}, 0.0, 1.0, "events", false, false};
     std::uint64_t last_interrupts{0};
     bool have_interrupts{false};
     gint64 last_tick_us{0};
