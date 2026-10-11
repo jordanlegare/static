@@ -369,7 +369,7 @@ int main(int argc, char **argv)
     argv[argc] = nullptr;
 
     GtkApplication *app = gtk_application_new("org.jordanlegare.staticbus",
-                                               G_APPLICATION_DEFAULT_FLAGS);
+                                               G_APPLICATION_FLAGS_NONE);
     g_signal_connect(app, "activate", G_CALLBACK(activate), &state);
     const int result = g_application_run(G_APPLICATION(app), argc, argv);
     close_device(&state);
