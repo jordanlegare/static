@@ -61,7 +61,9 @@ struct Metric {
     std::string source;
     std::string detail;
     std::vector<CounterFd> counters;
-    std::uint64_t rate{0};
+    double rate{0.0};
+    double unit_scale{1.0};
+    std::string display_unit{"events/s"};
     bool available{false};
     bool initialized{false};
 };
@@ -280,6 +282,22 @@ void open_uncore_metric(Metric& metric, const std::string& event_name)
         if (pmu_name.rfind("uncore_imc", 0) != 0) continue;
         if (!fs::exists(entry.path() / "events" / event_name, ec)) continue;
 
+        // Honour perf's own unit/scale metadata so the GUI can report MiB/s
+        // when this PMU exports data_reads.scale/data_reads.unit.
+        const std::string scale_text = read_text(entry.path() / "events" / (event_name + ".scale"));
+        const std::string unit_text = read_text(entry.path() / "events" / (event_name + ".unit"));
+        if (!scale_text.empty()) {
+            try {
+                const double scale = std::stod(scale_text);
+                if (std::isfinite(scale) && scale > 0.0)
+                    metric.unit_scale = scale;
+            } catch (...) {
+                metric.detail = pmu_name + ": invalid event scale; using raw counts";
+            }
+        }
+        if (!unit_text.empty())
+            metric.display_unit = unit_text;
+
         std::string error;
         perf_event_attr attr{};
         if (!build_pmu_attr(entry.path(), event_name, attr, error)) {
@@ -309,7 +327,7 @@ void open_uncore_metric(Metric& metric, const std::string& event_name)
     metric.available = !metric.counters.empty();
     if (metric.available) {
         metric.detail = std::to_string(metric.counters.size()) +
-                        " counter(s) opened; raw PMU counts, not bytes";
+                        " PMU instance counter(s) opened; unit/scale from sysfs when provided";
     } else if (metric.detail.empty()) {
         metric.detail = "Event unavailable or perf permissions denied";
     }
@@ -333,8 +351,11 @@ void open_core_cache_metric(Metric& metric)
             metric.detail = "CPU " + std::to_string(cpu) + ": " + error;
     }
     metric.available = !metric.counters.empty();
-    if (metric.available)
+    if (metric.available) {
         metric.detail = std::to_string(metric.counters.size()) + " CPU counter(s) opened";
+        metric.display_unit = "events";
+        metric.unit_scale = 1.0;
+    }
     else if (metric.detail.empty())
         metric.detail = "Event unavailable or perf permissions denied";
 }
@@ -408,10 +429,16 @@ void set_value(GtkWidget *label, const std::string& value)
     gtk_label_set_text(GTK_LABEL(label), value.c_str());
 }
 
-std::string metric_description(const Metric& metric, const std::string& unit)
+std::string metric_description(const Metric& metric, const std::string& fallback_unit)
 {
     if (!metric.available) return "Unavailable: " + metric.detail;
-    return metric.label + ": " + std::to_string(metric.rate) + " " + unit +
+    std::ostringstream value;
+    value.setf(std::ios::fixed);
+    value.precision(metric.display_unit == "MiB" || metric.display_unit == "MB" ? 2 : 0);
+    value << metric.rate;
+    const std::string unit = metric.display_unit.empty()
+                           ? fallback_unit : metric.display_unit + "/s";
+    return metric.label + ": " + value.str() + " " + unit +
            "\n" + metric.detail;
 }
 
@@ -439,9 +466,10 @@ gboolean sample_metrics(gpointer data)
         const auto it = previous_counts.find(metric.label);
         if (it != previous_counts.end()) {
             const std::uint64_t delta = current >= it->second ? current - it->second : 0;
-            const long double per_second = static_cast<long double>(delta) / elapsed;
+            const long double per_second =
+                (static_cast<long double>(delta) / elapsed) * metric.unit_scale;
             metric.rate = per_second > static_cast<long double>(UINT64_MAX)
-                        ? UINT64_MAX : static_cast<std::uint64_t>(per_second);
+                        ? static_cast<double>(UINT64_MAX) : static_cast<double>(per_second);
         } else {
             metric.rate = 0;
         }
@@ -468,8 +496,8 @@ gboolean sample_metrics(gpointer data)
         set_value(app->irq_label, "Host interrupts: /proc/stat unavailable");
     }
 
-    set_value(app->imc_read_label, metric_description(app->imc_reads, "event counts/s"));
-    set_value(app->imc_write_label, metric_description(app->imc_writes, "event counts/s"));
+    set_value(app->imc_read_label, metric_description(app->imc_reads, "events/s"));
+    set_value(app->imc_write_label, metric_description(app->imc_writes, "events/s"));
     set_value(app->cache_label, metric_description(app->cache_misses, "events/s"));
     set_value(app->edac_label, read_edac_summary());
 
